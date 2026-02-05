@@ -9,8 +9,12 @@ export const runtime = 'nodejs';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
+import { startTelegramPolling, isTelegramPollingActive } from '@/lib/telegram/polling';
 
 const SETTINGS_FILE = process.env.SETTINGS_FILE || '.data/settings.json';
+
+// Flag to ensure we only try to start polling once per server instance
+let telegramInitAttempted = false;
 
 export interface AppSettings {
     workdir: string;
@@ -44,6 +48,17 @@ export function getSettings(): AppSettings {
 export async function GET() {
     try {
         const settings = getSettings();
+        
+        // Auto-start Telegram polling on first page load (settings is fetched on page load)
+        // Only attempt once per server instance to avoid conflicts
+        if (!telegramInitAttempted) {
+            telegramInitAttempted = true;
+            if (!isTelegramPollingActive()) {
+                console.log('[Settings API] Auto-starting Telegram polling...');
+                startTelegramPolling(getSettings);
+            }
+        }
+        
         return new Response(JSON.stringify(settings), {
             headers: { 'Content-Type': 'application/json' },
         });

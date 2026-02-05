@@ -61,10 +61,17 @@ export async function POST(req: Request) {
 }
 
 /**
- * GET endpoint for status check
+ * GET endpoint for status check and polling startup
  */
 export async function GET() {
     const bot = getTelegramBot();
+    
+    // Auto-start polling if not active
+    if (bot && !isTelegramPollingActive()) {
+        console.log('[Telegram] Starting long-polling service via GET request...');
+        startTelegramPolling(getSettings);
+    }
+    
     const pollingActive = isTelegramPollingActive();
     
     return new Response(JSON.stringify({
