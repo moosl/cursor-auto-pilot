@@ -51,6 +51,7 @@ export async function GET(req: Request) {
             createdAt: chat.createdAt,
             cursorSessionId: chat.cursorSessionId,
             taskMd: chat.taskMd, // Include task.md content
+            workdir: chat.workdir, // Include working directory
         }),
         { headers: { 'Content-Type': 'application/json' } }
     );

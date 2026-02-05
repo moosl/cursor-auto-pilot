@@ -61,26 +61,30 @@ export function OrchestratePanel({
     // Track if we've loaded history
     const hasLoadedHistory = useRef(false);
 
-    // Load orchestrator messages history from server on mount
-    useEffect(() => {
-        if (hasLoadedHistory.current) return;
-        hasLoadedHistory.current = true;
+    // Track last known message count for polling
+    const lastMessageCount = useRef<number>(0);
 
-        const loadHistory = async () => {
-            try {
-                // Load from the dedicated orchestrator session
+    // Load orchestrator messages history from server
+    const loadHistory = async (isPolling = false) => {
+        try {
+            // Load from the dedicated orchestrator session
+            if (!isPolling) {
                 console.log(`[OrchestratePanel] Loading history for chatId=${ORCHESTRATOR_SESSION_ID}`);
-                const response = await fetch(`/api/chat-status?chatId=${ORCHESTRATOR_SESSION_ID}`);
-                
-                if (!response.ok) {
+            }
+            const response = await fetch(`/api/chat-status?chatId=${ORCHESTRATOR_SESSION_ID}`);
+            
+            if (!response.ok) {
+                if (!isPolling) {
                     console.log(`[OrchestratePanel] Response not ok: ${response.status}`);
-                    return;
                 }
-                
-                const data = await response.json();
-                console.log(`[OrchestratePanel] Loaded data:`, data);
-                
-                if (data.messages && data.messages.length > 0) {
+                return;
+            }
+            
+            const data = await response.json();
+            
+            if (data.messages && data.messages.length > 0) {
+                // Only update if there are new messages (or first load)
+                if (!isPolling || data.messages.length > lastMessageCount.current) {
                     // Get last N messages
                     const recentMessages = data.messages.slice(-MAX_HISTORY_MESSAGES);
                     
@@ -93,18 +97,45 @@ export function OrchestratePanel({
                         })
                     );
                     
-                    console.log(`[OrchestratePanel] Setting ${historyMessages.length} messages`);
+                    if (!isPolling) {
+                        console.log(`[OrchestratePanel] Setting ${historyMessages.length} messages`);
+                    }
+                    lastMessageCount.current = data.messages.length;
                     setMessages(historyMessages);
-                } else {
-                    console.log(`[OrchestratePanel] No messages found or error:`, data.error);
                 }
-            } catch (e) {
+            } else if (!isPolling) {
+                console.log(`[OrchestratePanel] No messages found or error:`, data.error);
+            }
+        } catch (e) {
+            if (!isPolling) {
                 console.error('[OrchestratePanel] Failed to load history:', e);
             }
-        };
-        
+        }
+    };
+
+    // Load history on mount
+    useEffect(() => {
+        if (hasLoadedHistory.current) return;
+        hasLoadedHistory.current = true;
         loadHistory();
     }, []);
+
+    // Poll for new messages when panel is open (for Telegram messages)
+    useEffect(() => {
+        if (!isOpen) return;
+        
+        // Poll every 3 seconds when panel is open
+        const pollInterval = setInterval(() => {
+            if (!isRunning) {
+                loadHistory(true);
+            }
+        }, 3000);
+        
+        // Also load immediately when panel opens
+        loadHistory(true);
+        
+        return () => clearInterval(pollInterval);
+    }, [isOpen, isRunning]);
 
     // Scroll to bottom when panel opens or messages change
     useEffect(() => {

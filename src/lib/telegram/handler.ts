@@ -85,28 +85,42 @@ export async function handleTelegramUpdate(bot: TelegramBot, update: TelegramUpd
             const workdir = getSettingsFn().workdir;
             const agent = new OrchestratorAgent();
 
-            // Create a session in database for this Telegram conversation
-            const sessionId = `tg_${chatId}_${generateId()}`;
-            const session: ChatSession = {
-                id: sessionId,
-                title: text.substring(0, 50) + (text.length > 50 ? '...' : ''),
-                status: 'running',
-                messages: [],
-                createdAt: new Date(),
-                isOrchestratorManaged: true,
-                source: 'telegram',
-            };
-            db.createSession(session);
+            // Use shared session ID so messages appear in Web Orchestrator panel too
+            const sessionId = 'web_orchestrator_main';
+            
+            // Check if session exists, create if not
+            console.log(`[Telegram] Checking for session: ${sessionId}`);
+            let session = db.getSession(sessionId);
+            if (!session) {
+                console.log(`[Telegram] Session not found, creating new one`);
+                session = {
+                    id: sessionId,
+                    title: 'Orchestrator',
+                    status: 'running',
+                    messages: [],
+                    createdAt: new Date(),
+                    isOrchestratorManaged: true,
+                    source: 'telegram',
+                };
+                db.createSession(session);
+                console.log(`[Telegram] Session created: ${sessionId}`);
+            } else {
+                console.log(`[Telegram] Session exists, updating status to running`);
+                // Update status to running
+                db.updateSession({ id: sessionId, status: 'running' });
+            }
 
-            // Save user message
+            // Save user message (mark as from Telegram)
             const userMessage: Message = {
                 id: generateId(),
                 role: 'user',
-                content: text,
+                content: `[Telegram] ${text}`,
                 timestamp: new Date(),
                 metadata: { source: 'user' },
             };
+            console.log(`[Telegram] Saving user message to session ${sessionId}: ${text.substring(0, 50)}...`);
             db.addMessage(sessionId, userMessage);
+            console.log(`[Telegram] User message saved`);
 
             let responseText = '';
             const createdChats: { id: string; title: string }[] = [];
@@ -178,6 +192,8 @@ export async function handleTelegramUpdate(bot: TelegramBot, update: TelegramUpd
             // Build final response
             let finalResponse = '';
             
+            console.log(`[Telegram] Orchestrator finished. responseText length: ${responseText.length}, createdChats: ${createdChats.length}, success: ${result.success}`);
+            
             if (responseText) {
                 finalResponse = responseText;
             }
@@ -193,6 +209,8 @@ export async function handleTelegramUpdate(bot: TelegramBot, update: TelegramUpd
             if (!finalResponse.trim()) {
                 finalResponse = '✅ All tasks processed successfully.';
             }
+
+            console.log(`[Telegram] Final response to send: ${finalResponse.substring(0, 200)}...`);
 
             // Save assistant response to database
             const assistantMessage: Message = {
@@ -210,9 +228,11 @@ export async function handleTelegramUpdate(bot: TelegramBot, update: TelegramUpd
                 status: result.success ? 'completed' : 'error' 
             });
 
-            await bot.sendLongMessage(chatId, finalResponse, {
+            // Send final response to Telegram
+            const sendResult = await bot.sendLongMessage(chatId, finalResponse, {
                 replyToMessageId: message.message_id,
             });
+            console.log(`[Telegram] Message sent result: ${sendResult}`);
 
         } catch (error) {
             console.error('[Telegram] Error processing message:', error);

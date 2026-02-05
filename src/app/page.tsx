@@ -897,7 +897,7 @@ function HomeContent() {
                 }
                 
                 // Update status and taskMd if changed
-                if (statusChanged || (nextTaskMd !== undefined)) {
+                if (statusChanged || nextTaskMd !== undefined) {
                     setSessions((prev) => {
                         const currentSess = prev.find(s => s.id === currentSessionId);
                         if (!currentSess) return prev;
@@ -1301,15 +1301,6 @@ function HomeContent() {
 
                         {currentSession && (
                             <div className="flex items-center gap-2">
-                                {/* Show workdir for subtasks */}
-                                {isOrchestratorSubtask(currentSession) && (
-                                    <span
-                                        className="text-xs text-[var(--text-muted)] font-mono bg-[var(--bg-secondary)] px-2 py-1 rounded"
-                                        title={currentSession.workdir || workdir}
-                                    >
-                                        {currentSession.workdir || workdir}
-                                    </span>
-                                )}
                                 {isOrchestratorManaged && (
                                     <span className="badge badge-default">
                                         Auto
