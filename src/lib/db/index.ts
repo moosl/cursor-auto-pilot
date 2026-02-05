@@ -26,6 +26,8 @@ const globalForDb = globalThis as unknown as {
         deleteSession?: Database.Statement;
         insertMessage?: Database.Statement;
         getMessages?: Database.Statement;
+        getMessagesRange?: Database.Statement;
+        getMessagesTail?: Database.Statement;
         getMessageCount?: Database.Statement;
         getLastMessage?: Database.Statement;
     } | undefined;
@@ -69,6 +71,7 @@ function getDb(): Database.Database {
 
         -- Create indexes for common queries
         CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
+        CREATE INDEX IF NOT EXISTS idx_messages_session_id_timestamp ON messages(session_id, timestamp);
         CREATE INDEX IF NOT EXISTS idx_sessions_status ON chat_sessions(status);
         CREATE INDEX IF NOT EXISTS idx_sessions_created_at ON chat_sessions(created_at DESC);
     `);
@@ -136,6 +139,12 @@ function getStatements() {
             `),
             getMessages: db.prepare(`
                 SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp ASC
+            `),
+            getMessagesRange: db.prepare(`
+                SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp ASC LIMIT ? OFFSET ?
+            `),
+            getMessagesTail: db.prepare(`
+                SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp DESC LIMIT ?
             `),
             getMessageCount: db.prepare(`
                 SELECT COUNT(*) as count FROM messages WHERE session_id = ?
@@ -372,6 +381,48 @@ export function getMessages(sessionId: string): Message[] {
         metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
         timestamp: new Date(row.timestamp),
     }));
+}
+
+export function getMessagesRange(sessionId: string, limit: number, offset: number): Message[] {
+    const s = getStatements();
+    const rows = s.getMessagesRange!.all(sessionId, limit, offset) as Array<{
+        id: string;
+        session_id: string;
+        role: 'user' | 'assistant' | 'system';
+        content: string;
+        metadata: string | null;
+        timestamp: number;
+    }>;
+    
+    return rows.map(row => ({
+        id: row.id,
+        role: row.role,
+        content: row.content,
+        metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+        timestamp: new Date(row.timestamp),
+    }));
+}
+
+export function getRecentMessages(sessionId: string, limit: number): Message[] {
+    const s = getStatements();
+    const rows = s.getMessagesTail!.all(sessionId, limit) as Array<{
+        id: string;
+        session_id: string;
+        role: 'user' | 'assistant' | 'system';
+        content: string;
+        metadata: string | null;
+        timestamp: number;
+    }>;
+    
+    return rows
+        .reverse()
+        .map(row => ({
+            id: row.id,
+            role: row.role,
+            content: row.content,
+            metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+            timestamp: new Date(row.timestamp),
+        }));
 }
 
 export function getMessageCount(sessionId: string): number {

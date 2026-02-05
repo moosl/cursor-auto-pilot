@@ -71,7 +71,14 @@ export function OrchestratePanel({
             if (!isPolling) {
                 console.log(`[OrchestratePanel] Loading history for chatId=${ORCHESTRATOR_SESSION_ID}`);
             }
-            const response = await fetch(`/api/chat-status?chatId=${ORCHESTRATOR_SESSION_ID}`);
+            const params = new URLSearchParams({ chatId: ORCHESTRATOR_SESSION_ID });
+            if (isPolling) {
+                params.set('after', String(Math.max(lastMessageCount.current, 0)));
+                params.set('limit', String(MAX_HISTORY_MESSAGES));
+            } else {
+                params.set('tail', String(MAX_HISTORY_MESSAGES));
+            }
+            const response = await fetch(`/api/chat-status?${params.toString()}`);
             
             if (!response.ok) {
                 if (!isPolling) {
@@ -82,30 +89,34 @@ export function OrchestratePanel({
             
             const data = await response.json();
             
+            const messageCount = typeof data.messageCount === 'number'
+                ? data.messageCount
+                : data.messages?.length ?? 0;
+
             if (data.messages && data.messages.length > 0) {
-                // Only update if there are new messages (or first load)
-                if (!isPolling || data.messages.length > lastMessageCount.current) {
-                    // Get last N messages
-                    const recentMessages = data.messages.slice(-MAX_HISTORY_MESSAGES);
-                    
-                    const historyMessages: OrchestrateMessage[] = recentMessages.map(
-                        (msg: { id: string; role: string; content: string; timestamp: string }) => ({
-                            id: msg.id,
-                            role: msg.role === 'system' ? 'status' : msg.role,
-                            content: msg.content,
-                            timestamp: new Date(msg.timestamp),
-                        })
-                    );
-                    
-                    if (!isPolling) {
-                        console.log(`[OrchestratePanel] Setting ${historyMessages.length} messages`);
-                    }
-                    lastMessageCount.current = data.messages.length;
+                const historyMessages: OrchestrateMessage[] = data.messages.map(
+                    (msg: { id: string; role: string; content: string; timestamp: string }) => ({
+                        id: msg.id,
+                        role: msg.role === 'system' ? 'status' : msg.role,
+                        content: msg.content,
+                        timestamp: new Date(msg.timestamp),
+                    })
+                );
+
+                if (!isPolling) {
+                    console.log(`[OrchestratePanel] Setting ${historyMessages.length} messages`);
                     setMessages(historyMessages);
+                } else {
+                    setMessages((prev) => {
+                        const merged = [...prev, ...historyMessages];
+                        return merged.slice(-MAX_HISTORY_MESSAGES);
+                    });
                 }
             } else if (!isPolling) {
                 console.log(`[OrchestratePanel] No messages found or error:`, data.error);
             }
+
+            lastMessageCount.current = messageCount;
         } catch (e) {
             if (!isPolling) {
                 console.error('[OrchestratePanel] Failed to load history:', e);

@@ -417,13 +417,15 @@ _Add any additional notes or requirements here_
                 }
 
                 // Add user message
-                session.messages.push({
+                const userMsg: Message = {
                     id: generateId(),
                     role: 'user',
                     content: message,
                     timestamp: new Date(),
                     metadata: { source: 'user' },
-                });
+                };
+                session.messages.push(userMsg);
+                db.addMessage(chat_id, userMsg); // Persist to database
 
                 // Send to Cursor
                 const result = await this.chatManager.sendSingleMessage(
@@ -433,13 +435,15 @@ _Add any additional notes or requirements here_
                 );
 
                 // Add response
-                session.messages.push({
+                const assistantMsg: Message = {
                     id: generateId(),
                     role: 'assistant',
                     content: result.content,
                     timestamp: new Date(),
                     metadata: { source: 'cursor' },
-                });
+                };
+                session.messages.push(assistantMsg);
+                db.addMessage(chat_id, assistantMsg); // Persist to database
 
                 onProgress?.({
                     type: 'chat_update',

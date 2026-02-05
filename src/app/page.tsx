@@ -24,6 +24,13 @@ interface DisplayMessage {
     metadata?: { source?: 'agent_manager' | 'orchestrator' | 'user' | 'cursor' | 'thinking' };
 }
 
+const SESSION_MESSAGE_LIMIT = 50;
+const STORAGE_MESSAGE_LIMIT = 50;
+const STORAGE_SAVE_DEBOUNCE_MS = 500;
+const ORCHESTRATOR_POLL_LIMIT = 50;
+const SUBTASK_POLL_LIMIT = 200;
+const SUBTASK_INITIAL_TAIL = 200;
+
 // Loading spinner component
 function LoadingSpinner() {
     return (
@@ -80,9 +87,10 @@ function HomeContent() {
                     const merged: AppSettings = {
                         workdir: prev.workdir || serverSettings.workdir,
                         skillsPath: prev.skillsPath || serverSettings.skillsPath,
+                        model: prev.model || serverSettings.model,
                     };
                     
-                    if (merged.workdir === prev.workdir && merged.skillsPath === prev.skillsPath) {
+                    if (merged.workdir === prev.workdir && merged.skillsPath === prev.skillsPath && merged.model === prev.model) {
                         return prev;
                     }
                     
@@ -184,6 +192,8 @@ function HomeContent() {
     }, [stop, currentSessionId, isOrchestratorManaged, currentSession?.orchestrateTaskId]);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const saveSessionsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const saveOrchestratorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Load sessions from server and localStorage on mount
     useEffect(() => {
@@ -193,7 +203,7 @@ function HomeContent() {
             
             // First try to load from server (includes Telegram sessions)
             try {
-                const response = await fetch('/api/sessions');
+                const response = await fetch(`/api/sessions?messageLimit=${SESSION_MESSAGE_LIMIT}`);
                 if (response.ok) {
                     const data = await response.json();
                     if (data.sessions && data.sessions.length > 0) {
@@ -205,7 +215,7 @@ function HomeContent() {
                                 timestamp: new Date(m.timestamp),
                             })),
                         }));
-                        console.log('[loadSessions] Restored sessions from server', restored.map((s) => ({
+                        console.log('[loadSessions] Restored sessions from server', restored.map((s: { id: string; title?: string; messages?: unknown[] }) => ({
                             id: s.id,
                             title: s.title,
                             messagesCount: s.messages?.length ?? 0,
@@ -221,10 +231,13 @@ function HomeContent() {
                                 // Load messages for sub-tasks from server
                                 if (urlSession.orchestrateTaskId && !urlSession.isOrchestratorManaged) {
                                     try {
-                                        const msgResponse = await fetch(`/api/chat-status?chatId=${urlChatId}`);
+                                        const msgResponse = await fetch(`/api/chat-status?chatId=${urlChatId}&includeMessages=1`);
                                         if (msgResponse.ok) {
                                             const msgData = await msgResponse.json();
                                             if (msgData.messages && msgData.messages.length > 0) {
+                                                const messageCount = typeof msgData.messageCount === 'number'
+                                                    ? msgData.messageCount
+                                                    : msgData.messages.length;
                                                 const mapped: ChatUiMessageWithMetadata[] = msgData.messages.map(
                                                     (m: { id: string; role: string; content: string; timestamp: string; metadata?: { source?: 'agent_manager' | 'orchestrator' | 'user' | 'cursor' | 'thinking' } }) => ({
                                                         id: m.id,
@@ -235,6 +248,7 @@ function HomeContent() {
                                                     })
                                                 );
                                                 setMessages(mapped);
+                                                lastMessageCounts.current.set(urlChatId, messageCount);
                                             }
                                         }
                                     } catch (e) {
@@ -409,20 +423,48 @@ function HomeContent() {
 
     // Save sessions to localStorage when changed
     useEffect(() => {
-        if (sessions.length > 0) {
-            localStorage.setItem('cursor-pilot-sessions', JSON.stringify(sessions));
+        if (saveSessionsTimeoutRef.current) {
+            clearTimeout(saveSessionsTimeoutRef.current);
         }
+        if (sessions.length === 0) return;
+        
+        saveSessionsTimeoutRef.current = setTimeout(() => {
+            const trimmedSessions = sessions.map((s) => ({
+                ...s,
+                messages: Array.isArray(s.messages)
+                    ? s.messages.slice(-STORAGE_MESSAGE_LIMIT)
+                    : [],
+            }));
+            localStorage.setItem('cursor-pilot-sessions', JSON.stringify(trimmedSessions));
+        }, STORAGE_SAVE_DEBOUNCE_MS);
+        
+        return () => {
+            if (saveSessionsTimeoutRef.current) {
+                clearTimeout(saveSessionsTimeoutRef.current);
+            }
+        };
     }, [sessions]);
 
     // Save orchestrator messages to localStorage when changed
     useEffect(() => {
-        if (orchestratorMessages.size > 0) {
+        if (saveOrchestratorTimeoutRef.current) {
+            clearTimeout(saveOrchestratorTimeoutRef.current);
+        }
+        if (orchestratorMessages.size === 0) return;
+        
+        saveOrchestratorTimeoutRef.current = setTimeout(() => {
             const obj: Record<string, DisplayMessage[]> = {};
             orchestratorMessages.forEach((value, key) => {
-                obj[key] = value;
+                obj[key] = value.slice(-STORAGE_MESSAGE_LIMIT);
             });
             localStorage.setItem('cursor-pilot-orchestrator-messages', JSON.stringify(obj));
-        }
+        }, STORAGE_SAVE_DEBOUNCE_MS);
+        
+        return () => {
+            if (saveOrchestratorTimeoutRef.current) {
+                clearTimeout(saveOrchestratorTimeoutRef.current);
+            }
+        };
     }, [orchestratorMessages]);
 
     // Auto-scroll to bottom when messages change or session changes
@@ -631,11 +673,15 @@ function HomeContent() {
                     
                     // Sub-task - load messages from server
                     try {
-                        const response = await fetch(`/api/chat-status?chatId=${id}`);
+                        const response = await fetch(`/api/chat-status?chatId=${id}&includeMessages=1`);
                         if (response.ok) {
                             const data = await response.json();
                             console.log(`[selectSession] Loaded ${data.messages?.length || 0} messages, status=${data.status}`);
                             
+                            const messageCount = typeof data.messageCount === 'number'
+                                ? data.messageCount
+                                : data.messages?.length ?? 0;
+
                             if (data.messages && data.messages.length > 0) {
                                 const mapped: ChatUiMessageWithMetadata[] = data.messages.map(
                                     (m: { id: string; role: string; content: string; timestamp: string; metadata?: { source?: 'agent_manager' | 'orchestrator' | 'user' | 'cursor' | 'thinking' } }) => ({
@@ -647,12 +693,10 @@ function HomeContent() {
                                     })
                                 );
                                 setMessages(mapped);
-                                // Use -1 if session is still running to ensure polling continues to update
-                                const countForPolling = session.status === 'running' ? -1 : mapped.length;
-                                lastMessageCounts.current.set(id, countForPolling);
+                                lastMessageCounts.current.set(id, messageCount);
                             } else {
                                 setMessages([]);
-                                lastMessageCounts.current.set(id, -1); // Use -1 to ensure first poll triggers
+                                lastMessageCounts.current.set(id, messageCount);
                             }
                             
                             // Also update session status from server if different
@@ -913,29 +957,56 @@ function HomeContent() {
         const pollChats = async () => {
             for (const chat of chatsToWatch) {
                 try {
-                    const response = await fetch(`/api/chat-status?chatId=${chat.id}`);
+                    const lastCount = lastMessageCounts.current.get(chat.id);
+                    const isFirstPoll = typeof lastCount !== 'number';
+                    const params = new URLSearchParams({ chatId: chat.id });
+                    if (!isFirstPoll) {
+                        params.set('after', String(lastCount));
+                        params.set('limit', String(ORCHESTRATOR_POLL_LIMIT));
+                    } else {
+                        // First poll - get recent messages
+                        params.set('tail', String(ORCHESTRATOR_POLL_LIMIT));
+                    }
+                    const response = await fetch(`/api/chat-status?${params.toString()}`);
                     if (!response.ok) continue;
 
                     const data = await response.json();
-                    
-                    // Check for new messages
-                    const lastCount = lastMessageCounts.current.get(chat.id) || 0;
-                    
-                    if (data.messages && data.messages.length > lastCount) {
-                        // Add new messages
-                        const newMessages = data.messages.slice(lastCount);
-                        
-                        for (const msg of newMessages) {
-                            if (msg.role === 'assistant') {
-                                addOrchestratorMessage(chat.id, 'assistant', msg.content);
-                            } else if (msg.role === 'user') {
-                                // Agent Manager's follow-up (including "Mission Complete")
-                                const prefix = msg.content === 'Mission Complete' ? '✅ ' : '🤖 ';
-                                addOrchestratorMessage(chat.id, 'system', `${prefix}${msg.content}`);
+
+                    const messageCount = typeof data.messageCount === 'number'
+                        ? data.messageCount
+                        : (typeof lastCount === 'number' ? lastCount : 0);
+
+                    if (data.messages && data.messages.length > 0) {
+                        if (isFirstPoll) {
+                            // First poll - set messages directly (replace)
+                            const mapped: DisplayMessage[] = data.messages.map(
+                                (msg: { id: string; role: string; content: string; timestamp: string }) => ({
+                                    id: msg.id,
+                                    role: msg.role as 'user' | 'assistant' | 'system',
+                                    content: msg.content,
+                                    timestamp: new Date(msg.timestamp),
+                                })
+                            );
+                            setOrchestratorMessages((prev) => {
+                                const newMap = new Map(prev);
+                                newMap.set(chat.id, mapped);
+                                return newMap;
+                            });
+                        } else {
+                            // Subsequent polls - add new messages
+                            for (const msg of data.messages) {
+                                if (msg.role === 'assistant') {
+                                    addOrchestratorMessage(chat.id, 'assistant', msg.content);
+                                } else if (msg.role === 'user') {
+                                    // Agent Manager's follow-up (including "Mission Complete")
+                                    const prefix = msg.content === 'Mission Complete' ? '✅ ' : '🤖 ';
+                                    addOrchestratorMessage(chat.id, 'system', `${prefix}${msg.content}`);
+                                }
                             }
                         }
-                        lastMessageCounts.current.set(chat.id, data.messages.length);
                     }
+                    
+                    lastMessageCounts.current.set(chat.id, messageCount);
 
                     // Update status if changed
                     if (data.status !== chat.status) {
@@ -1008,17 +1079,29 @@ function HomeContent() {
             if (stopped) return;
             
             try {
-                const response = await fetch(`/api/chat-status?chatId=${currentSessionId}`, { signal: controller.signal });
+                const params = new URLSearchParams({ chatId: currentSessionId });
+                if (lastKnownCount === -1) {
+                    params.set('tail', String(SUBTASK_INITIAL_TAIL));
+                } else {
+                    params.set('after', String(lastKnownCount));
+                    params.set('limit', String(SUBTASK_POLL_LIMIT));
+                }
+
+                const response = await fetch(`/api/chat-status?${params.toString()}`, { signal: controller.signal });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 
                 const data = await response.json();
                 
-                const nextCount = data.messages?.length ?? 0;
+                const nextCount = typeof data.messageCount === 'number'
+                    ? data.messageCount
+                    : lastKnownCount;
                 const nextStatus = data.status as ChatStatus | undefined;
                 const nextTaskMd = data.taskMd as string | undefined;
                 
                 // Detect changes - use lastKnownCount to handle first fetch correctly
-                const messagesChanged = lastKnownCount === -1 || nextCount !== lastKnownCount;
+                const messagesChanged = lastKnownCount === -1
+                    ? (data.messages?.length ?? 0) > 0
+                    : nextCount !== lastKnownCount;
                 const statusChanged = nextStatus !== undefined && nextStatus !== lastKnownStatus;
                 const changed = messagesChanged || statusChanged;
                 
@@ -1035,7 +1118,18 @@ function HomeContent() {
                             metadata: m.metadata,
                         })
                     );
-                    setMessages(mapped);
+                    if (lastKnownCount === -1) {
+                        setMessages(mapped);
+                    } else {
+                        setMessages((prev) => [...prev, ...mapped]);
+                    }
+                    if (typeof nextCount === 'number') {
+                        lastMessageCounts.current.set(currentSessionId, nextCount);
+                        lastKnownCount = nextCount;
+                    }
+                }
+
+                if (typeof nextCount === 'number' && nextCount !== lastKnownCount) {
                     lastMessageCounts.current.set(currentSessionId, nextCount);
                     lastKnownCount = nextCount;
                 }

@@ -9,6 +9,24 @@ import { ChatSession } from '@/lib/types';
 
 export const runtime = 'nodejs';
 
+const DEFAULT_MESSAGE_LIMIT = 50;
+const MAX_MESSAGE_LIMIT = 500;
+
+function parsePositiveInt(value: string | null): number | undefined {
+    if (!value) return undefined;
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isNaN(parsed) || parsed < 0) return undefined;
+    return parsed;
+}
+
+function clamp(value: number, min: number, max: number): number {
+    return Math.min(max, Math.max(min, value));
+}
+
+function parseBoolean(value: string | null): boolean {
+    return value === '1' || value === 'true';
+}
+
 /**
  * POST /api/sessions - Create a new session
  */
@@ -60,15 +78,33 @@ export async function POST(req: Request) {
     }
 }
 
-export async function GET() {
+export async function GET(req: Request) {
     try {
+        const url = new URL(req.url);
+        const includeMessages = parseBoolean(url.searchParams.get('includeMessages'));
+        const messageLimitParam = parsePositiveInt(url.searchParams.get('messageLimit'));
+        const messageLimit = clamp(
+            messageLimitParam ?? DEFAULT_MESSAGE_LIMIT,
+            0,
+            MAX_MESSAGE_LIMIT
+        );
+
         // Get all sessions from database (metadata only)
         const sessionsWithoutMessages = db.getAllSessions();
         
-        // Load messages for all sessions so manual chats restore correctly after refresh
+        // Load recent messages for all sessions so manual chats restore correctly after refresh
         const sessions = sessionsWithoutMessages.map((s) => {
-            const fullSession = db.getSessionWithMessages(s.id);
-            return fullSession || s;
+            if (includeMessages) {
+                const fullSession = db.getSessionWithMessages(s.id);
+                return fullSession || s;
+            }
+            if (messageLimit === 0) {
+                return s;
+            }
+            return {
+                ...s,
+                messages: db.getRecentMessages(s.id, messageLimit),
+            };
         });
         
         // Also include any active sessions from memory
