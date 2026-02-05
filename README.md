@@ -57,6 +57,7 @@ CursorPilot supports Telegram bot integration, allowing you to interact with the
 Add the following to your `.env` file:
 
 ```bash
+# Telegram Bot Integration
 TELEGRAM_BOT_TOKEN=your_bot_token_here
 TELEGRAM_ALLOWED_CHAT_IDS=your_chat_id_here
 TELEGRAM_DEFAULT_WORKDIR=/path/to/your/projects
