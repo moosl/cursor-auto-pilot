@@ -34,7 +34,6 @@ Visit http://localhost:3000
 | `ANTHROPIC_MODEL` | Model override (default: claude-sonnet-4-20250514) |
 | `TELEGRAM_BOT_TOKEN` | Telegram Bot Token (optional, for Telegram integration) |
 | `TELEGRAM_ALLOWED_CHAT_IDS` | Comma-separated Telegram chat IDs allowed to use the bot |
-| `TELEGRAM_DEFAULT_WORKDIR` | Default working directory for Telegram tasks |
 
 ## Telegram Bot Integration
 
@@ -60,10 +59,11 @@ Add the following to your `.env` file:
 # Telegram Bot Integration
 TELEGRAM_BOT_TOKEN=your_bot_token_here
 TELEGRAM_ALLOWED_CHAT_IDS=your_chat_id_here
-TELEGRAM_DEFAULT_WORKDIR=/path/to/your/projects
 ```
 
 Multiple chat IDs can be specified separated by commas: `123456789,987654321`
+
+Note: Telegram tasks will use the working directory configured in Settings.
 
 ### Step 4: Expose Local Server with ngrok
 

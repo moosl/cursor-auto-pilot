@@ -12,7 +12,7 @@ import { dirname, join } from 'path';
 
 const SETTINGS_FILE = process.env.SETTINGS_FILE || '.data/settings.json';
 
-interface AppSettings {
+export interface AppSettings {
     workdir: string;
     skillsPath: string;
 }
@@ -29,7 +29,7 @@ function ensureDirectory(filePath: string) {
     }
 }
 
-function getSettings(): AppSettings {
+export function getSettings(): AppSettings {
     try {
         if (existsSync(SETTINGS_FILE)) {
             const data = readFileSync(SETTINGS_FILE, 'utf-8');

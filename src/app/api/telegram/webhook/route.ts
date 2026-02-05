@@ -7,6 +7,7 @@ import { OrchestratorAgent } from '@/lib/agent/orchestrator';
 import * as db from '@/lib/db';
 import { ChatSession, Message } from '@/lib/types';
 import { generateId } from '@/lib/utils/id';
+import { getSettings } from '@/app/api/settings/route';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60; // 1 minute timeout
@@ -97,7 +98,7 @@ export async function POST(req: Request) {
 
             // Process with Orchestrator Agent (main agent mode)
             try {
-                const workdir = process.env.TELEGRAM_DEFAULT_WORKDIR || '/tmp';
+                const workdir = getSettings().workdir;
                 const agent = new OrchestratorAgent();
 
                 // Create a session in database for this Telegram conversation
@@ -661,7 +662,7 @@ async function handleSelectedChatMessage(
     console.log(`[Telegram Webhook] Handling message in selected chat: ${selectedChatId}`);
 
     try {
-        const workdir = session.workdir || process.env.TELEGRAM_DEFAULT_WORKDIR || '/tmp';
+        const workdir = session.workdir || getSettings().workdir;
         
         // Import ChatManager for direct Cursor communication
         const { ChatManager } = await import('@/lib/agent/chat-manager');
