@@ -11,6 +11,28 @@ CursorPilot provides two interaction modes:
 
 ## Setup
 
+### 1. Install Cursor CLI
+
+CursorPilot requires the Cursor CLI (`agent` command) to interact with Cursor Agent. Install it first:
+
+```bash
+# macOS, Linux, WSL
+curl https://cursor.com/install -fsS | bash
+
+# Windows PowerShell
+irm 'https://cursor.com/install?win32=true' | iex
+```
+
+Verify the installation:
+
+```bash
+agent --version
+```
+
+For more details, see the [Cursor CLI documentation](https://cursor.com/cn/docs/cli/overview).
+
+### 2. Install Dependencies and Configure
+
 ```bash
 # Install dependencies
 pnpm install
@@ -32,6 +54,7 @@ Visit http://localhost:3000
 | `ANTHROPIC_API_KEY` | Anthropic API key (required for Orchestrator) |
 | `ANTHROPIC_BASE_URL` | Optional proxy URL (e.g., one-api, DeepSeek) |
 | `ANTHROPIC_MODEL` | Model override (default: claude-sonnet-4-20250514) |
+| `DEFAULT_WORKDIR` | Default working directory for the Orchestrator |
 | `TELEGRAM_BOT_TOKEN` | Telegram Bot Token (optional, for Telegram integration) |
 | `TELEGRAM_ALLOWED_CHAT_IDS` | Comma-separated Telegram chat IDs allowed to use the bot |
 
