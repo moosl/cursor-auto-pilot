@@ -60,7 +60,7 @@ Visit http://localhost:3000
 
 ## Telegram Bot Integration
 
-CursorPiolt supports Telegram bot integration, allowing you to interact with the Orchestrator Agent directly from Telegram.
+CursorPilot supports Telegram bot integration, allowing you to interact with the Orchestrator Agent directly from Telegram.
 
 ### Step 1: Create a Telegram Bot
 
@@ -86,43 +86,11 @@ TELEGRAM_ALLOWED_CHAT_IDS=your_chat_id_here
 
 Multiple chat IDs can be specified separated by commas: `123456789,987654321`
 
-Note: Telegram tasks will use the working directory configured in Settings.
-
-### Step 4: Expose Local Server with ngrok
-
-Telegram webhooks require a public HTTPS URL. Use [ngrok](https://ngrok.com/) to create a tunnel to your local server:
-
-```bash
-# Install ngrok (if not already installed)
-brew install ngrok  # macOS
-# or download from https://ngrok.com/download
-
-# Start ngrok tunnel (keep this running)
-ngrok http 3000
-```
-
-ngrok will provide a public URL like `https://xxxx-xx-xx-xxx-xx.ngrok-free.app`
-
-### Step 5: Set Up Webhook
-
-Use the provided script to configure the webhook:
-
-```bash
-# Set webhook URL (use your ngrok URL)
-npx tsx scripts/setup-telegram-webhook.ts https://your-domain.ngrok-free.app/api/telegram/webhook
-
-# Other available commands:
-npx tsx scripts/setup-telegram-webhook.ts info     # Show current webhook info
-npx tsx scripts/setup-telegram-webhook.ts menu     # Set bot commands menu
-npx tsx scripts/setup-telegram-webhook.ts delete   # Delete webhook
-```
-
-### Step 6: Test the Bot
+### Step 4: Test the Bot
 
 1. Make sure your dev server is running (`pnpm dev`)
-2. Make sure ngrok is running and pointing to port 3000
-3. Send `/start` to your bot in Telegram
-4. Try sending a task like "List all TypeScript files in the project"
+2. Send `/start` to your bot in Telegram
+3. Try sending a task like "List all TypeScript files in the project"
 
 ### Telegram Bot Commands
 
@@ -134,34 +102,6 @@ npx tsx scripts/setup-telegram-webhook.ts delete   # Delete webhook
 | `/back` | Return to main orchestrator agent |
 | `/status` | Show system status and chat statistics |
 | `/clear` | Clear conversation history |
-
-### Telegram Architecture
-
-```
-┌────────────────┐         ┌─────────────────┐         ┌──────────────────┐
-│   Telegram     │  HTTPS  │     ngrok       │  HTTP   │   Next.js App    │
-│   Cloud API    │◄───────►│   Tunnel        │◄───────►│   localhost:3000 │
-└────────────────┘         └─────────────────┘         └──────────────────┘
-                                                              │
-                                                              ▼
-                                                       ┌──────────────────┐
-                                                       │  /api/telegram/  │
-                                                       │    webhook       │
-                                                       └──────────────────┘
-                                                              │
-                                                              ▼
-                                                       ┌──────────────────┐
-                                                       │  Orchestrator    │
-                                                       │     Agent        │
-                                                       └──────────────────┘
-```
-
-### Production Deployment
-
-For production, replace ngrok with a proper deployment:
-
-1. Deploy to Vercel, Railway, or any hosting with HTTPS
-2. Update the webhook URL: `npx tsx scripts/setup-telegram-webhook.ts https://your-production-domain.com/api/telegram/webhook`
 
 ## Usage
 

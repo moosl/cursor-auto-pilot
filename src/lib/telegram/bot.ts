@@ -58,9 +58,22 @@ export interface InlineKeyboardMarkup {
 
 const TELEGRAM_API_BASE = 'https://api.telegram.org/bot';
 
+// Bot commands for the menu
+const BOT_COMMANDS = [
+    { command: 'chats', description: '📋 Browse and select chats' },
+    { command: 'back', description: '🤖 Return to main agent' },
+    { command: 'status', description: '📊 Show system status' },
+    { command: 'clear', description: '🗑️ Clear conversation history' },
+    { command: 'start', description: '🚀 Start the bot' },
+    { command: 'help', description: '📚 Show help' }
+];
+
 export class TelegramBot {
     private token: string;
     private allowedChatIds: Set<number>;
+    private pollingActive: boolean = false;
+    private lastUpdateId: number = 0;
+    private pollingAbortController: AbortController | null = null;
 
     constructor(config: TelegramBotConfig) {
         this.token = config.token;
@@ -300,6 +313,136 @@ export class TelegramBot {
         } catch (error) {
             return { ok: false, description: String(error) };
         }
+    }
+
+    /**
+     * Set bot commands menu
+     */
+    async setCommands(): Promise<boolean> {
+        try {
+            const response = await fetch(`${TELEGRAM_API_BASE}${this.token}/setMyCommands`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ commands: BOT_COMMANDS }),
+            });
+            const result = await response.json();
+            if (result.ok) {
+                console.log('[Telegram] Bot commands menu set successfully');
+            } else {
+                console.error('[Telegram] Failed to set commands:', result);
+            }
+            return result.ok;
+        } catch (error) {
+            console.error('[Telegram] Error setting commands:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Get updates using long-polling
+     */
+    async getUpdates(timeout: number = 30): Promise<TelegramUpdate[]> {
+        try {
+            const params = new URLSearchParams({
+                timeout: timeout.toString(),
+                allowed_updates: JSON.stringify(['message', 'callback_query']),
+            });
+            
+            if (this.lastUpdateId > 0) {
+                params.set('offset', (this.lastUpdateId + 1).toString());
+            }
+
+            const response = await fetch(
+                `${TELEGRAM_API_BASE}${this.token}/getUpdates?${params}`,
+                {
+                    signal: this.pollingAbortController?.signal,
+                }
+            );
+            
+            const result = await response.json();
+            
+            if (!result.ok) {
+                console.error('[Telegram] getUpdates failed:', result);
+                return [];
+            }
+
+            const updates: TelegramUpdate[] = result.result || [];
+            
+            // Update offset to acknowledge received updates
+            if (updates.length > 0) {
+                this.lastUpdateId = Math.max(...updates.map(u => u.update_id));
+            }
+
+            return updates;
+        } catch (error) {
+            // Don't log abort errors (expected when stopping)
+            if ((error as Error).name !== 'AbortError') {
+                console.error('[Telegram] Error getting updates:', error);
+            }
+            return [];
+        }
+    }
+
+    /**
+     * Start long-polling loop
+     */
+    async startPolling(onUpdate: (update: TelegramUpdate) => Promise<void>): Promise<void> {
+        if (this.pollingActive) {
+            console.log('[Telegram] Polling already active');
+            return;
+        }
+
+        // Delete any existing webhook first (required for polling to work)
+        console.log('[Telegram] Deleting webhook to enable polling...');
+        await this.deleteWebhook();
+
+        // Set bot commands menu
+        await this.setCommands();
+
+        this.pollingActive = true;
+        this.pollingAbortController = new AbortController();
+        
+        console.log('[Telegram] Starting long-polling...');
+
+        while (this.pollingActive) {
+            try {
+                const updates = await this.getUpdates(30);
+                
+                for (const update of updates) {
+                    try {
+                        await onUpdate(update);
+                    } catch (error) {
+                        console.error('[Telegram] Error processing update:', error);
+                    }
+                }
+            } catch (error) {
+                if ((error as Error).name === 'AbortError') {
+                    break;
+                }
+                console.error('[Telegram] Polling error:', error);
+                // Wait before retrying on error
+                await new Promise(resolve => setTimeout(resolve, 5000));
+            }
+        }
+
+        console.log('[Telegram] Polling stopped');
+    }
+
+    /**
+     * Stop long-polling
+     */
+    stopPolling(): void {
+        console.log('[Telegram] Stopping polling...');
+        this.pollingActive = false;
+        this.pollingAbortController?.abort();
+        this.pollingAbortController = null;
+    }
+
+    /**
+     * Check if polling is active
+     */
+    isPolling(): boolean {
+        return this.pollingActive;
     }
 }
 

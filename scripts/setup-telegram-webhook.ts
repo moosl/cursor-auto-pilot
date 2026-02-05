@@ -1,11 +1,14 @@
 /**
  * Setup Telegram Webhook
  * 
+ * NOTE: CursorPilot uses long-polling by default - no webhook setup required!
+ * Only use this script if you want to switch to webhook mode for production.
+ * 
  * Usage:
- *   npx tsx scripts/setup-telegram-webhook.ts <webhook-url>
- *   npx tsx scripts/setup-telegram-webhook.ts menu     # Set bot commands menu
- *   npx tsx scripts/setup-telegram-webhook.ts info     # Show current webhook info
- *   npx tsx scripts/setup-telegram-webhook.ts delete   # Delete webhook
+ *   npx tsx scripts/setup-telegram-webhook.ts <webhook-url>  # Set webhook (switches from polling to webhook)
+ *   npx tsx scripts/setup-telegram-webhook.ts menu           # Set bot commands menu
+ *   npx tsx scripts/setup-telegram-webhook.ts info           # Show current webhook info
+ *   npx tsx scripts/setup-telegram-webhook.ts delete         # Delete webhook (returns to polling mode)
  * 
  * Example:
  *   npx tsx scripts/setup-telegram-webhook.ts https://your-domain.com/api/telegram/webhook
@@ -72,6 +75,9 @@ async function main() {
         const deleteResponse = await fetch(`${TELEGRAM_API_BASE}${token}/deleteWebhook`);
         const deleteResult = await deleteResponse.json();
         console.log(JSON.stringify(deleteResult, null, 2));
+        if (deleteResult.ok) {
+            console.log('\n✅ Webhook deleted. Bot will use long-polling mode on next restart.');
+        }
         return;
     }
 

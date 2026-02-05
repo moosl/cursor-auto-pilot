@@ -390,10 +390,13 @@ function HomeContent() {
         }
     }, [orchestratorMessages]);
 
-    // Auto-scroll to bottom
+    // Auto-scroll to bottom when messages change or session changes
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages, orchestratorMessages]);
+        // Use setTimeout to ensure DOM is updated after session switch
+        setTimeout(() => {
+            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 50);
+    }, [messages, orchestratorMessages, currentSessionId]);
 
     // Send pending manual message after session is created
     useEffect(() => {
@@ -1253,6 +1256,14 @@ function HomeContent() {
     // - Show manual chats (no orchestrateTaskId)
     // - Hide main orchestrator conversations (isOrchestratorManaged = true, e.g., Telegram sessions)
     const sidebarSessions = sessions.filter((s) => !isOrchestratorMain(s));
+
+    // Auto-select first chat when no chat is selected (and sessions are loaded)
+    useEffect(() => {
+        if (!currentSessionId && sidebarSessions.length > 0) {
+            // Select the first available chat
+            selectSession(sidebarSessions[0].id);
+        }
+    }, [currentSessionId, sidebarSessions, selectSession]);
 
     // Get status badge style
     const getStatusBadge = (status: ChatStatus) => {
