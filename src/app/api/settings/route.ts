@@ -5,45 +5,14 @@
 
 export const runtime = 'nodejs';
 
-// Use a simple file-based storage for settings
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
-import { homedir } from 'os';
-import { dirname, join } from 'path';
+import { getSettings, saveSettings, AppSettings } from '@/lib/settings';
 import { startTelegramPolling, isTelegramPollingActive } from '@/lib/telegram/polling';
 
-const SETTINGS_FILE = process.env.SETTINGS_FILE || '.data/settings.json';
+// Re-export types for compatibility
+export type { AppSettings };
 
 // Flag to ensure we only try to start polling once per server instance
 let telegramInitAttempted = false;
-
-export interface AppSettings {
-    workdir: string;
-    skillsPath: string;
-}
-
-const DEFAULT_SETTINGS: AppSettings = {
-    workdir: process.env.DEFAULT_WORKDIR || process.cwd(),
-    skillsPath: process.env.SKILLS_PATH || join(homedir(), '.cursor', 'skills'),
-};
-
-function ensureDirectory(filePath: string) {
-    const dir = dirname(filePath);
-    if (!existsSync(dir)) {
-        mkdirSync(dir, { recursive: true });
-    }
-}
-
-export function getSettings(): AppSettings {
-    try {
-        if (existsSync(SETTINGS_FILE)) {
-            const data = readFileSync(SETTINGS_FILE, 'utf-8');
-            return { ...DEFAULT_SETTINGS, ...JSON.parse(data) };
-        }
-    } catch (e) {
-        console.error('Failed to load settings:', e);
-    }
-    return DEFAULT_SETTINGS;
-}
 
 export async function GET() {
     try {
@@ -75,8 +44,7 @@ export async function POST(req: Request) {
     try {
         const settings = await req.json();
         
-        ensureDirectory(SETTINGS_FILE);
-        writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2));
+        saveSettings(settings);
         
         return new Response(JSON.stringify({ success: true, settings }), {
             headers: { 'Content-Type': 'application/json' },

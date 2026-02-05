@@ -10,24 +10,13 @@
 import { getTelegramBot, TelegramUpdate } from '@/lib/telegram/bot';
 import { handleTelegramUpdate, setSettingsGetter } from '@/lib/telegram/handler';
 import { startTelegramPolling, isTelegramPollingActive } from '@/lib/telegram/polling';
-import { getSettings } from '@/app/api/settings/route';
+import { getSettings } from '@/lib/settings';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60; // 1 minute timeout
 
 // Initialize settings getter for handler
 setSettingsGetter(getSettings);
-
-// Auto-start polling when this module is loaded (for long-polling mode)
-// This runs once when the server starts
-if (typeof window === 'undefined') {
-    // Server-side only
-    const bot = getTelegramBot();
-    if (bot && !isTelegramPollingActive()) {
-        console.log('[Telegram] Auto-starting long-polling service...');
-        startTelegramPolling(getSettings);
-    }
-}
 
 /**
  * POST handler for webhook mode

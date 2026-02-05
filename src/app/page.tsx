@@ -118,6 +118,10 @@ function HomeContent() {
         useChat({
             api: '/api/chat',
             id: currentSessionId || undefined,
+            body: {
+                // Pass workdir - backend will prefer session's workdir if set
+                workdir: currentSession?.workdir || workdir,
+            },
             onFinish: (message) => {
                 // Clear waiting state when response is received
                 setIsWaitingForResponse(false);
@@ -490,13 +494,29 @@ function HomeContent() {
 
     // Create a new chat session (manual)
     const createNewSession = useCallback(
-        (title?: string) => {
+        (workdirOrTitle?: string) => {
+            // If provided string looks like a path, use it as workdir; otherwise treat as title
+            const isPath = workdirOrTitle && (workdirOrTitle.startsWith('/') || workdirOrTitle.startsWith('~'));
+            const sessionWorkdir = isPath ? workdirOrTitle : workdir;
+            
+            // Extract folder name from path for title
+            let title = 'New Chat';
+            if (isPath && workdirOrTitle) {
+                // Remove trailing slashes and get the last part of the path
+                const cleanPath = workdirOrTitle.replace(/\/+$/, '');
+                const parts = cleanPath.split('/').filter(p => p.length > 0);
+                title = parts.length > 0 ? parts[parts.length - 1] : 'New Chat';
+            } else if (workdirOrTitle) {
+                title = workdirOrTitle;
+            }
+            
             const newSession: ChatSession = {
                 id: generateId(),
-                title: title || 'New Chat',
+                title,
                 createdAt: new Date(),
                 status: 'idle',
                 messages: [],
+                workdir: sessionWorkdir, // Store workdir for this session
                 // No orchestrateTaskId = manual chat
             };
             setSessions((prev) => [newSession, ...prev]);
@@ -506,7 +526,7 @@ function HomeContent() {
             router.push(`/?chat=${newSession.id}`, { scroll: false });
             return newSession.id;
         },
-        [setMessages, router]
+        [setMessages, router, workdir]
     );
 
     // Select a session
@@ -1289,6 +1309,7 @@ function HomeContent() {
                 onSelect={selectSession}
                 onNew={createNewSession}
                 onDelete={deleteSession}
+                defaultWorkdir={workdir}
             />
 
             <main className="flex-1 flex flex-col relative">

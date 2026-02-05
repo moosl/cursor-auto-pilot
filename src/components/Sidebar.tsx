@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { ChatSession, ChatStatus } from '@/lib/types';
 
@@ -7,8 +8,9 @@ interface SidebarProps {
     sessions: ChatSession[];
     currentId: string | null;
     onSelect: (id: string) => void;
-    onNew: () => void;
+    onNew: (workdir: string) => void;
     onDelete: (id: string) => void;
+    defaultWorkdir: string;
 }
 
 function getStatusIcon(status: ChatStatus): React.ReactNode {
@@ -28,7 +30,7 @@ function getStatusIcon(status: ChatStatus): React.ReactNode {
                     className="w-3 h-3" 
                     viewBox="0 0 16 16" 
                     fill="none"
-                    title={`Status: ${status}`}
+                    aria-label={`Status: ${status}`}
                 >
                     <path 
                         d="M13.5 4.5L6 12L2.5 8.5" 
@@ -58,7 +60,10 @@ function getStatusIcon(status: ChatStatus): React.ReactNode {
     }
 }
 
-export function Sidebar({ sessions, currentId, onSelect, onNew, onDelete }: SidebarProps) {
+export function Sidebar({ sessions, currentId, onSelect, onNew, onDelete, defaultWorkdir }: SidebarProps) {
+    const [showNewChatModal, setShowNewChatModal] = useState(false);
+    const [newChatWorkdir, setNewChatWorkdir] = useState(defaultWorkdir);
+
     const handleDelete = (e: React.MouseEvent, id: string) => {
         e.stopPropagation(); // Prevent selecting the session
         if (confirm('Delete this chat? This cannot be undone.')) {
@@ -66,7 +71,76 @@ export function Sidebar({ sessions, currentId, onSelect, onNew, onDelete }: Side
         }
     };
 
+    const handleNewChat = () => {
+        setNewChatWorkdir(defaultWorkdir);
+        setShowNewChatModal(true);
+    };
+
+    const handleCreateChat = () => {
+        if (newChatWorkdir.trim()) {
+            onNew(newChatWorkdir.trim());
+            setShowNewChatModal(false);
+        }
+    };
+
     return (
+        <>
+        {/* New Chat Modal */}
+        {showNewChatModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center overlay">
+                <div className="bg-[var(--bg-primary)] w-[450px] rounded-xl border shadow-xl overflow-hidden">
+                    <div className="flex items-center justify-between px-5 py-4 border-b">
+                        <h3 className="font-semibold text-[var(--text-primary)]">New Chat</h3>
+                        <button
+                            onClick={() => setShowNewChatModal(false)}
+                            className="btn btn-ghost h-8 w-8 p-0"
+                        >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                        </button>
+                    </div>
+                    <div className="p-5">
+                        <label className="block text-sm font-medium text-[var(--text-secondary)] mb-2">
+                            Project Directory
+                        </label>
+                        <input
+                            type="text"
+                            value={newChatWorkdir}
+                            onChange={(e) => setNewChatWorkdir(e.target.value)}
+                            placeholder="/path/to/your/project"
+                            className="input w-full font-mono text-sm"
+                            autoFocus
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    handleCreateChat();
+                                } else if (e.key === 'Escape') {
+                                    setShowNewChatModal(false);
+                                }
+                            }}
+                        />
+                        <p className="text-xs text-[var(--text-muted)] mt-2">
+                            Enter the path to your project folder. Cursor Agent will work in this directory.
+                        </p>
+                    </div>
+                    <div className="flex justify-end gap-2 px-5 py-4 border-t bg-[var(--bg-secondary)]">
+                        <button
+                            onClick={() => setShowNewChatModal(false)}
+                            className="btn btn-secondary"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            onClick={handleCreateChat}
+                            disabled={!newChatWorkdir.trim()}
+                            className="btn btn-primary"
+                        >
+                            Create Chat
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
         <aside className="w-64 h-full flex flex-col border-r bg-[var(--bg-secondary)]">
             {/* Header / Title */}
             <div className="h-14 flex items-center px-4 border-b">
@@ -80,10 +154,10 @@ export function Sidebar({ sessions, currentId, onSelect, onNew, onDelete }: Side
                 </div>
             </div>
 
-            {/* New Chat Button - Disabled */}
-            {/* <div className="p-3">
+            {/* New Chat Button */}
+            <div className="p-3">
                 <button
-                    onClick={() => onNew()}
+                    onClick={handleNewChat}
                     className="w-full btn btn-secondary h-9 text-sm justify-start gap-2"
                 >
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -91,7 +165,7 @@ export function Sidebar({ sessions, currentId, onSelect, onNew, onDelete }: Side
                     </svg>
                     New Chat
                 </button>
-            </div> */}
+            </div>
 
             {/* Chat List */}
             <div className="flex-1 overflow-y-auto px-2 pt-3 pb-3">
@@ -169,5 +243,6 @@ export function Sidebar({ sessions, currentId, onSelect, onNew, onDelete }: Side
                 <span className="text-xs text-[var(--text-muted)]">v0.2</span>
             </div>
         </aside>
+        </>
     );
 }

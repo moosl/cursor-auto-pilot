@@ -6,37 +6,71 @@ import { getTelegramBot } from './bot';
 import { handleTelegramUpdate, setSettingsGetter } from './handler';
 
 let pollingStarted = false;
+let startingPromise: Promise<void> | null = null; // Lock to prevent concurrent starts
 
 /**
  * Start Telegram polling service
  * Should be called once when the app starts
  */
 export async function startTelegramPolling(getSettings: () => { workdir: string }): Promise<void> {
-    if (pollingStarted) {
-        console.log('[Telegram Polling] Already started');
+    // Check if already polling (actual state check)
+    const bot = getTelegramBot();
+    if (bot?.isPolling()) {
+        console.log('[Telegram Polling] Already polling, skipping');
         return;
     }
 
-    const bot = getTelegramBot();
+    // If already started (flag check), return
+    if (pollingStarted) {
+        console.log('[Telegram Polling] Already started (flag), skipping');
+        return;
+    }
+
+    // If there's a start in progress, wait for it
+    if (startingPromise) {
+        console.log('[Telegram Polling] Start already in progress, waiting...');
+        await startingPromise;
+        return;
+    }
+
     if (!bot) {
         console.log('[Telegram Polling] Bot not configured, skipping');
         return;
     }
 
-    // Inject settings getter
-    setSettingsGetter(getSettings);
+    // Create a promise to lock concurrent starts
+    startingPromise = (async () => {
+        try {
+            // Double-check after acquiring lock
+            if (bot.isPolling()) {
+                console.log('[Telegram Polling] Already polling (double-check), skipping');
+                pollingStarted = true;
+                return;
+            }
 
-    pollingStarted = true;
+            // Inject settings getter
+            setSettingsGetter(getSettings);
 
-    // Start polling in background (don't await - let it run)
-    bot.startPolling(async (update) => {
-        await handleTelegramUpdate(bot, update);
-    }).catch((error) => {
-        console.error('[Telegram Polling] Fatal error:', error);
-        pollingStarted = false;
-    });
+            pollingStarted = true;
 
-    console.log('[Telegram Polling] Service started');
+            // Start polling in background (don't await - let it run)
+            bot.startPolling(async (update) => {
+                await handleTelegramUpdate(bot, update);
+            }).catch((error) => {
+                console.error('[Telegram Polling] Fatal error:', error);
+                pollingStarted = false;
+            });
+
+            console.log('[Telegram Polling] Service started');
+        } finally {
+            // Release lock after a short delay to ensure polling actually started
+            setTimeout(() => {
+                startingPromise = null;
+            }, 1000);
+        }
+    })();
+
+    await startingPromise;
 }
 
 /**
@@ -48,6 +82,7 @@ export function stopTelegramPolling(): void {
         bot.stopPolling();
     }
     pollingStarted = false;
+    startingPromise = null; // Reset lock
     console.log('[Telegram Polling] Service stopped');
 }
 
