@@ -22,7 +22,8 @@ export async function DELETE(
         }
 
         // Check if session exists
-        const session = db.getSessionMeta(id);
+        // Return full session with messages so UI can restore chat history
+        const session = db.getSessionWithMessages(id);
         if (!session) {
             // Also try to remove from memory if exists there
             OrchestratorAgent.removeChat(id);

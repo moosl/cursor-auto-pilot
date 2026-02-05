@@ -5,22 +5,70 @@
 import { existsSync } from 'fs';
 import { OrchestratorAgent } from '@/lib/agent/orchestrator';
 import * as db from '@/lib/db';
+import { ChatSession } from '@/lib/types';
 
 export const runtime = 'nodejs';
 
+/**
+ * POST /api/sessions - Create a new session
+ */
+export async function POST(req: Request) {
+    try {
+        const body = await req.json();
+        const { id, title, workdir } = body;
+        
+        if (!id) {
+            return new Response(
+                JSON.stringify({ error: 'Session ID is required' }),
+                { status: 400, headers: { 'Content-Type': 'application/json' } }
+            );
+        }
+        
+        // Check if session already exists
+        const existing = db.getSessionMeta(id);
+        if (existing) {
+            // Return existing session instead of error
+            return new Response(
+                JSON.stringify({ session: existing, created: false }),
+                { headers: { 'Content-Type': 'application/json' } }
+            );
+        }
+        
+        // Create new session
+        const newSession: ChatSession = {
+            id,
+            title: title || 'New Chat',
+            status: 'idle',
+            messages: [],
+            createdAt: new Date(),
+            workdir: workdir || undefined,
+        };
+        
+        db.createSession(newSession);
+        console.log(`[Sessions API] Created new session: ${id}, title: ${title}`);
+        
+        return new Response(
+            JSON.stringify({ session: newSession, created: true }),
+            { status: 201, headers: { 'Content-Type': 'application/json' } }
+        );
+    } catch (error) {
+        console.error('[Sessions API] Create error:', error);
+        return new Response(
+            JSON.stringify({ error: 'Failed to create session' }),
+            { status: 500, headers: { 'Content-Type': 'application/json' } }
+        );
+    }
+}
+
 export async function GET() {
     try {
-        // Get all sessions from database (without messages for list)
+        // Get all sessions from database (metadata only)
         const sessionsWithoutMessages = db.getAllSessions();
         
-        // Load messages for orchestrator-managed sessions
-        const sessions = sessionsWithoutMessages.map(s => {
-            if (s.isOrchestratorManaged || s.orchestrateTaskId) {
-                // Load full session with messages
-                const fullSession = db.getSession(s.id);
-                return fullSession || s;
-            }
-            return s;
+        // Load messages for all sessions so manual chats restore correctly after refresh
+        const sessions = sessionsWithoutMessages.map((s) => {
+            const fullSession = db.getSessionWithMessages(s.id);
+            return fullSession || s;
         });
         
         // Also include any active sessions from memory

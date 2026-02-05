@@ -495,21 +495,10 @@ export function OrchestratePanel({
                         </button>
                         <button
                             onClick={() => onClose(lastCreatedChatId.current || undefined)}
-                            className="btn btn-ghost h-8 w-8 p-0"
+                            className="btn btn-secondary h-8 w-8 p-0 flex items-center justify-center text-sm"
+                            title="Close Orchestrator"
                         >
-                            <svg
-                                className="w-4 h-4"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                            >
-                                <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={1.5}
-                                    d="M6 18L18 6M6 6l12 12"
-                                />
-                            </svg>
+                            ×
                         </button>
                     </div>
                 </div>

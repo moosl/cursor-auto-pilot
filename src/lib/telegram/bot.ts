@@ -362,6 +362,12 @@ export class TelegramBot {
             const result = await response.json();
             
             if (!result.ok) {
+                // If conflict (409), another instance is polling - stop this one
+                if (result.error_code === 409) {
+                    console.warn('[Telegram] Conflict detected: another bot instance is polling. Stopping this instance.');
+                    this.pollingActive = false;
+                    throw new Error('CONFLICT_409');
+                }
                 console.error('[Telegram] getUpdates failed:', result);
                 return [];
             }
@@ -417,6 +423,12 @@ export class TelegramBot {
                 }
             } catch (error) {
                 if ((error as Error).name === 'AbortError') {
+                    break;
+                }
+                // If conflict (409), stop polling immediately
+                if ((error as Error).message === 'CONFLICT_409') {
+                    console.log('[Telegram] Stopping polling due to conflict');
+                    this.pollingActive = false;
                     break;
                 }
                 console.error('[Telegram] Polling error:', error);

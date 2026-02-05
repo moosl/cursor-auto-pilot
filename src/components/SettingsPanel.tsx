@@ -5,11 +5,29 @@ import { useState, useEffect } from 'react';
 export interface AppSettings {
     workdir: string;
     skillsPath: string;
+    model: string;
 }
+
+// Available Cursor Agent models
+export const AVAILABLE_MODELS = [
+    { id: 'auto', name: 'Auto', description: 'Let Cursor choose the best model' },
+    { id: 'opus-4.5-thinking', name: 'Claude 4.5 Opus (Thinking)', description: 'Most capable, with extended thinking' },
+    { id: 'opus-4.5', name: 'Claude 4.5 Opus', description: 'Most capable Claude model' },
+    { id: 'sonnet-4.5-thinking', name: 'Claude 4.5 Sonnet (Thinking)', description: 'Fast and capable, with thinking' },
+    { id: 'sonnet-4.5', name: 'Claude 4.5 Sonnet', description: 'Fast and capable' },
+    { id: 'composer-1', name: 'Composer 1', description: 'Cursor Composer 1 model' },
+    { id: 'gpt-5.2', name: 'GPT-5.2', description: 'OpenAI GPT-5.2' },
+    { id: 'gpt-5.2-high', name: 'GPT-5.2 High', description: 'Higher quality GPT-5.2' },
+    { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex', description: 'Optimized for code' },
+    { id: 'gemini-3-pro', name: 'Gemini 3 Pro', description: 'Google Gemini 3 Pro' },
+    { id: 'gemini-3-flash', name: 'Gemini 3 Flash', description: 'Fast Google model' },
+    { id: 'grok', name: 'Grok', description: 'xAI Grok' },
+];
 
 const DEFAULT_SETTINGS: AppSettings = {
     workdir: '',
     skillsPath: '',
+    model: 'auto',
 };
 
 const SETTINGS_KEY = 'cursor-pilot-settings';
@@ -143,6 +161,27 @@ export function SettingsPanel({ isOpen, onClose, settings, onSettingsChange }: S
                         />
                         <p className="text-xs text-[var(--text-muted)] mt-1.5">
                             The directory containing Cursor skill files (.md)
+                        </p>
+                    </div>
+
+                    {/* Model Selection */}
+                    <div>
+                        <label className="block text-sm font-medium text-[var(--text-primary)] mb-2">
+                            Cursor Agent Model
+                        </label>
+                        <select
+                            value={localSettings.model || 'auto'}
+                            onChange={(e) => setLocalSettings({ ...localSettings, model: e.target.value })}
+                            className="input text-sm"
+                        >
+                            {AVAILABLE_MODELS.map((model) => (
+                                <option key={model.id} value={model.id}>
+                                    {model.name}
+                                </option>
+                            ))}
+                        </select>
+                        <p className="text-xs text-[var(--text-muted)] mt-1.5">
+                            {AVAILABLE_MODELS.find(m => m.id === (localSettings.model || 'auto'))?.description || 'Select a model for Cursor Agent'}
                         </p>
                     </div>
                 </div>

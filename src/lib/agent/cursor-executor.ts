@@ -6,6 +6,7 @@
 import { spawn, ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
 import { CursorAgentMessage, CursorTaskResult, ChatStreamEvent, ToolCallResult } from '../types';
+import { getSettings } from '../settings';
 
 export interface TaskProgress {
     type: 'thinking' | 'assistant' | 'tool_call' | 'tool_result' | 'status' | 'model_info';
@@ -64,6 +65,7 @@ export function registerCursorCall(task: string, workdir: string, chatId?: strin
         startTime: new Date(),
         status: 'running',
     });
+    console.log('[registerCursorCall] Registered', { id, chatId, activeCount: activeCursorCalls.size, runningCount: getActiveCursorCalls().length });
     return id;
 }
 
@@ -79,10 +81,14 @@ export function completeCursorCall(id: string, success: boolean): void {
     if (call) {
         call.status = success ? 'completed' : 'error';
         call.process = undefined; // Clear process reference
+        console.log('[completeCursorCall] Completed', { id, success, activeCount: activeCursorCalls.size, runningCount: getActiveCursorCalls().length });
         // Remove after a short delay to allow UI to show completion
         setTimeout(() => {
             activeCursorCalls.delete(id);
+            console.log('[completeCursorCall] Removed', { id, activeCount: activeCursorCalls.size, runningCount: getActiveCursorCalls().length });
         }, 5000);
+    } else {
+        console.warn('[completeCursorCall] Call not found', { id });
     }
 }
 
@@ -128,11 +134,13 @@ export class CursorAgentSession extends EventEmitter {
     private currentToolCallResults: ToolCallResult[] = [];
     private workdir: string;
     private resumeSessionId?: string;
+    private configuredModel?: string;
 
-    constructor(workdir: string, resumeSessionId?: string) {
+    constructor(workdir: string, resumeSessionId?: string, model?: string) {
         super();
         this.workdir = workdir;
         this.resumeSessionId = resumeSessionId;
+        this.configuredModel = model;
     }
 
     get cursorSessionId(): string | undefined {
@@ -155,10 +163,18 @@ export class CursorAgentSession extends EventEmitter {
             throw new Error('Session already started');
         }
 
+        // Get model from config or settings
+        const settings = getSettings();
+        const model = this.configuredModel || settings.model || 'auto';
+
         // Build command args - use print mode for interactive with streaming partial output
         const args = ['-p', '--output-format=stream-json', '--stream-partial-output', '--force'];
         if (this.resumeSessionId) {
             args.push('--resume', this.resumeSessionId);
+        }
+        // Always add model parameter (even for 'auto' to let Cursor choose)
+        if (model) {
+            args.push('--model', model);
         }
 
         this.process = spawn('agent', args, {
@@ -411,16 +427,25 @@ export async function executeCursorTask(
         onProgress?: (progress: TaskProgress) => void;
         chatId?: string;
         chatTitle?: string;
+        model?: string;
     }
 ): Promise<CursorTaskResult> {
     // Register this call for tracking
     const callId = registerCursorCall(task, workdir, options?.chatId, options?.chatTitle);
+    
+    // Get model from options or settings
+    const settings = getSettings();
+    const model = options?.model || settings.model || 'auto';
     
     return new Promise((resolve) => {
         // Build command args with stream-partial-output for real-time progress
         const args = ['-p', '--output-format=stream-json', '--stream-partial-output', '--force'];
         if (options?.sessionId) {
             args.push('--resume', options.sessionId);
+        }
+        // Always add model parameter (even for 'auto' to let Cursor choose)
+        if (model) {
+            args.push('--model', model);
         }
 
         // Spawn agent process

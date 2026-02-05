@@ -197,7 +197,7 @@ function HomeContent() {
                 if (response.ok) {
                     const data = await response.json();
                     if (data.sessions && data.sessions.length > 0) {
-                        const restored = data.sessions.map((s: { createdAt: string | Date; messages: Array<{ timestamp: string | Date }> }) => ({
+                        const restored = data.sessions.map((s: { id: string; createdAt: string | Date; messages: Array<{ timestamp: string | Date }> }) => ({
                             ...s,
                             createdAt: new Date(s.createdAt),
                             messages: (s.messages || []).map((m) => ({
@@ -205,6 +205,11 @@ function HomeContent() {
                                 timestamp: new Date(m.timestamp),
                             })),
                         }));
+                        console.log('[loadSessions] Restored sessions from server', restored.map((s) => ({
+                            id: s.id,
+                            title: s.title,
+                            messagesCount: s.messages?.length ?? 0,
+                        })));
                         setSessions(restored);
                         
                         // If URL has chatId, select that session and load its messages
@@ -252,6 +257,19 @@ function HomeContent() {
                             const normalSession = restored.find((s: ChatSession) => isManualChat(s));
                             if (normalSession) {
                                 setCurrentSessionId(normalSession.id);
+                                // Auto-restore messages for the first manual chat
+                                if (normalSession.messages && normalSession.messages.length > 0) {
+                                    setMessages(
+                                        normalSession.messages.map(
+                                            (m: { id: string; role: string; content: string; timestamp: string | Date }) => ({
+                                                id: m.id,
+                                                role: m.role as ChatUiMessage['role'],
+                                                content: m.content,
+                                                createdAt: new Date(m.timestamp),
+                                            })
+                                        )
+                                    );
+                                }
                             }
                             // If only orchestrator sessions exist, don't auto-select any
                         }
@@ -314,6 +332,19 @@ function HomeContent() {
                         const normalSession = restored.find((s: ChatSession) => isManualChat(s));
                         if (normalSession) {
                             setCurrentSessionId(normalSession.id);
+                            // Auto-restore messages for the first manual chat from localStorage
+                            if (normalSession.messages && normalSession.messages.length > 0) {
+                                setMessages(
+                                    normalSession.messages.map(
+                                        (m: { id: string; role: string; content: string; timestamp: string | Date }) => ({
+                                            id: m.id,
+                                            role: m.role as ChatUiMessage['role'],
+                                            content: m.content,
+                                            createdAt: new Date(m.timestamp),
+                                        })
+                                    )
+                                );
+                            }
                         }
                         
                         // Check if there are any sidebar-visible sessions
@@ -435,6 +466,8 @@ function HomeContent() {
     useEffect(() => {
         if (!currentSessionId || isOrchestratorManaged) return;
         if (isLoading) return;
+        // 如果当前没有 useChat 消息（例如刚刷新页面），不要用空数组把从后端加载的历史消息覆盖掉
+        if (messages.length === 0) return;
 
         setSessions((prev) =>
             prev.map((s) => {
@@ -460,20 +493,58 @@ function HomeContent() {
     }, [messages, isLoading, currentSessionId, isOrchestratorManaged]);
 
     // Get display messages based on session type
-    // Use useMemo to properly react to orchestratorMessages changes
+    // 优先使用 session 上从后端加载的 messages，这样刷新后也能还原历史
+    // 但是当正在加载时（isLoading），优先使用 useChat 的 messages，因为它包含最新的用户输入
     const displayMessages: DisplayMessage[] = useMemo(() => {
+        // 1) Orchestrator 主会话：用 orchestratorMessages
         if (isOrchestratorManaged && currentSessionId) {
             return orchestratorMessages.get(currentSessionId) || [];
         }
+
+        // 2) 如果正在加载（发送/接收消息中），优先使用 useChat 的 messages，因为它包含最新的用户输入
+        if (isLoading && messages.length > 0) {
+            console.log('[displayMessages] Using useChat messages (loading)', {
+                currentSessionId,
+                count: messages.length,
+            });
+            return messages.map((m) => ({
+                id: m.id,
+                role: m.role as 'user' | 'assistant' | 'system',
+                content: m.content,
+                timestamp: (m as { createdAt?: Date }).createdAt || new Date(),
+                metadata: (m as { metadata?: { source?: 'agent_manager' | 'orchestrator' | 'user' | 'cursor' | 'thinking' } }).metadata,
+            }));
+        }
+
+        // 3) 任何 session 只要有 session.messages（来自 /api/sessions 的数据），都优先用它
+        if (currentSession && Array.isArray((currentSession as any).messages) && (currentSession as any).messages.length > 0) {
+            console.log('[displayMessages] Using currentSession.messages', {
+                sessionId: currentSession.id,
+                count: (currentSession as any).messages.length,
+            });
+            return (currentSession as any).messages.map((m: any) => ({
+                id: m.id,
+                role: m.role as 'user' | 'assistant' | 'system',
+                content: m.content,
+                timestamp: m.timestamp ? new Date(m.timestamp) : new Date(),
+                metadata: m.metadata,
+            }));
+        }
+
+        // 4) 回退：用 useChat 的内存 messages（新会话或 streaming 中）
+        console.log('[displayMessages] Using useChat messages', {
+            currentSessionId,
+            isOrchestratorManaged,
+            count: messages.length,
+        });
         return messages.map((m) => ({
             id: m.id,
-            // Preserve system role for Agent Manager messages
             role: m.role as 'user' | 'assistant' | 'system',
             content: m.content,
             timestamp: (m as { createdAt?: Date }).createdAt || new Date(),
             metadata: (m as { metadata?: { source?: 'agent_manager' | 'orchestrator' | 'user' | 'cursor' | 'thinking' } }).metadata,
         }));
-    }, [isOrchestratorManaged, currentSessionId, orchestratorMessages, messages]);
+    }, [isOrchestratorManaged, currentSessionId, orchestratorMessages, messages, currentSession, isLoading]);
 
     const resolveSystemLabel = (msg: DisplayMessage) => {
         const source = msg.metadata?.source;
@@ -524,6 +595,20 @@ function HomeContent() {
             setMessages([]);
             // Update URL with new chat ID
             router.push(`/?chat=${newSession.id}`, { scroll: false });
+            
+            // Save to server database immediately (fire and forget)
+            fetch('/api/sessions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id: newSession.id,
+                    title: newSession.title,
+                    workdir: newSession.workdir,
+                }),
+            }).catch((e) => {
+                console.error('Failed to save session to server:', e);
+            });
+            
             return newSession.id;
         },
         [setMessages, router, workdir]
@@ -583,9 +668,9 @@ function HomeContent() {
                         setMessages([]);
                     }
                 } else if (isManualChat(session)) {
-                    // Manual chat - restore from session
+                    // Manual chat - restore from session (messages were loaded via /api/sessions on mount)
                     setMessages(
-                        session.messages.map((m) => ({
+                        (session.messages || []).map((m) => ({
                             ...m,
                             createdAt: new Date(m.timestamp),
                         }))
@@ -750,8 +835,8 @@ function HomeContent() {
         });
     }, []);
 
-    // Handle chat status update from orchestrate
-    // Note: Messages for sub-tasks are loaded via polling, so we only update status here
+    // Handle chat status / error update from orchestrate
+    // 默认只更新状态；如果有 errorMessage，则在对应聊天中也插入一条 system 消息，让错误出现在主对话流里
     const handleChatUpdate = useCallback((
         chatId: string,
         status: ChatStatus,
@@ -759,20 +844,59 @@ function HomeContent() {
         _messageType?: 'cursor_response' | 'ai_followup',
         errorMessage?: string
     ) => {
-        // Update session status and error message if provided
-        setSessions((prev) => prev.map((s) => {
-            if (s.id === chatId) {
-                return { 
-                    ...s, 
-                    status, 
-                    errorMessage: status === 'error' ? errorMessage : undefined 
-                };
+        // 1) 更新 session 状态 + 挂上 errorMessage
+        setSessions((prev) =>
+            prev.map((s) => {
+                if (s.id === chatId) {
+                    return {
+                        ...s,
+                        status,
+                        errorMessage: status === 'error' ? errorMessage : undefined,
+                    };
+                }
+                return s;
+            })
+        );
+
+        // 2) 如果是 error，并且有错误信息，把它作为一条 system 消息插到对应聊天里
+        if (status === 'error' && errorMessage) {
+            const systemContent = `❌ ${errorMessage}`;
+
+            // 更新 sessions 里的 messages（用于刷新后恢复）
+            setSessions((prev) =>
+                prev.map((s) => {
+                    if (s.id !== chatId) return s;
+                    const existing = Array.isArray((s as any).messages) ? (s as any).messages : [];
+                    const now = new Date();
+                    const newMsg = {
+                        id: generateId(),
+                        role: 'system' as const,
+                        content: systemContent,
+                        timestamp: now,
+                        metadata: { source: 'orchestrator' as const },
+                    };
+                    return {
+                        ...s,
+                        messages: [...existing, newMsg],
+                    };
+                })
+            );
+
+            // 如果当前正打开的是这个聊天，把错误也追加到前端 messages 里，让它立刻显示出来
+            if (currentSessionId === chatId) {
+                setMessages((prev) => [
+                    ...prev,
+                    {
+                        id: generateId(),
+                        role: 'system',
+                        content: systemContent,
+                        createdAt: new Date(),
+                        metadata: { source: 'orchestrator' as const },
+                    },
+                ]);
             }
-            return s;
-        }));
-        
-        // Messages are loaded via polling /api/chat-status, no need to add here
-    }, []);
+        }
+    }, [currentSessionId, setMessages, setSessions]);
 
     // Poll for chat status updates for main orchestrator chats (e.g., Telegram sessions)
     // Note: Sub-tasks (orchestrateTaskId set but NOT isOrchestratorManaged) are shown in sidebar
@@ -1429,12 +1553,12 @@ function HomeContent() {
                         {/* Settings Button */}
                         <button
                             onClick={() => setIsSettingsOpen(true)}
-                            className="btn btn-ghost h-8 w-8 p-0"
+                            className="btn btn-secondary h-8 px-2 text-xs"
                             title="Settings"
                         >
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M10.343 3.94c.09-.542.56-.94 1.11-.94h1.093c.55 0 1.02.398 1.11.94l.149.894c.07.424.384.764.78.93.398.164.855.142 1.205-.108l.737-.527a1.125 1.125 0 011.45.12l.773.774c.39.389.44 1.002.12 1.45l-.527.737c-.25.35-.272.806-.107 1.204.165.397.505.71.93.78l.893.15c.543.09.94.559.94 1.109v1.094c0 .55-.397 1.02-.94 1.11l-.894.149c-.424.07-.764.383-.929.78-.165.398-.143.854.107 1.204l.527.738c.32.447.269 1.06-.12 1.45l-.774.773a1.125 1.125 0 01-1.449.12l-.738-.527c-.35-.25-.806-.272-1.203-.107-.398.165-.71.505-.781.929l-.149.894c-.09.542-.56.94-1.11.94h-1.094c-.55 0-1.019-.398-1.11-.94l-.148-.894c-.071-.424-.384-.764-.781-.93-.398-.164-.854-.142-1.204.108l-.738.527c-.447.32-1.06.269-1.45-.12l-.773-.774a1.125 1.125 0 01-.12-1.45l.527-.737c.25-.35.272-.806.108-1.204-.165-.397-.506-.71-.93-.78l-.894-.15c-.542-.09-.94-.56-.94-1.109v-1.094c0-.55.398-1.02.94-1.11l.894-.149c.424-.07.765-.383.93-.78.165-.398.143-.854-.108-1.204l-.526-.738a1.125 1.125 0 01.12-1.45l.773-.773a1.125 1.125 0 011.45-.12l.737.527c.35.25.807.272 1.204.107.397-.165.71-.505.78-.929l.15-.894z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                             </svg>
                         </button>
                         
@@ -1594,11 +1718,11 @@ function HomeContent() {
                                         </div>
                                         <button
                                             onClick={handleStopChat}
-                                            className="btn btn-ghost h-6 w-6 p-0 text-[var(--text-muted)] hover:text-[var(--destructive)] opacity-0 group-hover:opacity-100 transition-opacity"
+                                            className="btn btn-ghost h-7 w-7 p-0 text-[var(--destructive)] hover:bg-[var(--destructive)] hover:text-white transition-all"
                                             title="Stop"
                                         >
-                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                                <rect x="6" y="6" width="12" height="12" rx="1" fill="currentColor" />
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                                <rect x="6" y="6" width="12" height="12" rx="2" />
                                             </svg>
                                         </button>
                                     </div>

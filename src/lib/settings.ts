@@ -10,11 +10,13 @@ const SETTINGS_FILE = process.env.SETTINGS_FILE || '.data/settings.json';
 export interface AppSettings {
     workdir: string;
     skillsPath: string;
+    model: string;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
     workdir: process.env.DEFAULT_WORKDIR || process.cwd(),
     skillsPath: process.env.SKILLS_PATH || join(homedir(), '.cursor', 'skills'),
+    model: process.env.CURSOR_MODEL || 'auto',
 };
 
 export function ensureDirectory(filePath: string) {

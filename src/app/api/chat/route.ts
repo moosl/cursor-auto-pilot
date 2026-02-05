@@ -8,6 +8,12 @@ import { ChatManager } from '@/lib/agent/chat-manager';
 import { CursorAgentMessage, Message } from '@/lib/types';
 import * as db from '@/lib/db';
 import { generateId } from '@/lib/utils/id';
+import { getSettings } from '@/lib/settings';
+import {
+    registerCursorCall,
+    setCallProcess,
+    completeCursorCall,
+} from '@/lib/agent/cursor-executor';
 
 /**
  * Extract text content from Cursor message
@@ -110,27 +116,47 @@ export async function POST(req: Request) {
  * - 0: text content (JSON string)
  * - 2: data array (must be JSON array, not object)
  * - d: done message
+ *
+ * 同时会通过 cursor-executor 的全局 tracker 统计当前运行中的 Cursor 进程，
+ * 这样右上角的 "X active" 能实时反映 New Chat 调用的 agent 进程数。
  */
 function handleSingleMode(prompt: string, sessionId?: string, chatId?: string, workdir?: string): Response {
     const encoder = new TextEncoder();
+
+    // Get model from settings
+    const settings = getSettings();
+    const model = settings.model || 'auto';
 
     // Build command args
     const args = ['-p', '--output-format=stream-json', '--force'];
     if (sessionId) {
         args.push('--resume', sessionId);
     }
+    // Always add model parameter (even for 'auto' to let Cursor choose)
+    if (model) {
+        args.push('--model', model);
+    }
+
+    // Register this call for system-status tracking
+    const effectiveWorkdir = workdir || process.cwd();
+    const callId = registerCursorCall(prompt, effectiveWorkdir, chatId, undefined);
+    console.log('[handleSingleMode] Registered cursor call', { callId, chatId, workdir: effectiveWorkdir, prompt: prompt.slice(0, 50) });
 
     // Spawn cursor agent process with workdir as cwd
     const agent = spawn('agent', args, {
         stdio: ['pipe', 'pipe', 'pipe'],
-        cwd: workdir || undefined,
+        cwd: effectiveWorkdir,
     });
+
+    // Save process reference so it can be killed if needed
+    setCallProcess(callId, agent);
 
     const stream = new ReadableStream({
         async start(controller) {
             let buffer = '';
             let cursorSessionId: string | undefined;
             let fullResponse = ''; // Accumulate full response for saving
+            let stderrBuffer = ''; // Capture stderr for error messages
 
             // Send prompt to stdin and close
             agent.stdin.write(prompt);
@@ -170,13 +196,47 @@ function handleSingleMode(prompt: string, sessionId?: string, chatId?: string, w
                 }
             });
 
+            // Capture stderr for error messages
+            agent.stderr.on('data', (chunk: Buffer) => {
+                const text = chunk.toString();
+                stderrBuffer += text;
+                console.error('[Agent stderr]', text);
+            });
+
             // Handle process completion
             agent.on('close', (code) => {
                 if (code !== 0) {
-                    const errorMsg = `\n\n⚠️ Agent exited with code ${code}`;
-                    controller.enqueue(encoder.encode(`0:${JSON.stringify(errorMsg)}\n`));
+                    // Extract meaningful error message from stderr
+                    let errorMsg = `⚠️ Agent exited with code ${code}`;
+                    
+                    // Common error patterns to extract
+                    if (stderrBuffer.includes('Slow Pool Error')) {
+                        // Extract the specific error message about model availability
+                        const match = stderrBuffer.match(/Slow Pool Error[^.]+\./);
+                        if (match) {
+                            errorMsg = `⚠️ ${match[0]} Please check your Cursor subscription settings.`;
+                        }
+                    } else if (stderrBuffer.includes('rate limit')) {
+                        errorMsg = '⚠️ Rate limit exceeded. Please wait a moment and try again.';
+                    } else if (stderrBuffer.includes('authentication') || stderrBuffer.includes('unauthorized')) {
+                        errorMsg = '⚠️ Authentication error. Please check your Cursor login status.';
+                    } else if (stderrBuffer.includes('network') || stderrBuffer.includes('ECONNREFUSED')) {
+                        errorMsg = '⚠️ Network error. Please check your internet connection.';
+                    } else if (stderrBuffer.trim()) {
+                        // Use the stderr content if available but not matched above
+                        const cleanedStderr = stderrBuffer.trim().split('\n')[0]; // First line
+                        if (cleanedStderr.length < 200) {
+                            errorMsg = `⚠️ ${cleanedStderr}`;
+                        }
+                    }
+                    
+                    controller.enqueue(encoder.encode(`0:${JSON.stringify('\n\n' + errorMsg)}\n`));
                 }
                 
+                // Mark call as completed / errored for system-status
+                console.log('[handleSingleMode] Completing cursor call', { callId, success: code === 0 });
+                completeCursorCall(callId, code === 0);
+
                 // Save assistant response and cursor session ID to database
                 if (chatId && fullResponse) {
                     const assistantMsg: Message = {
@@ -207,16 +267,14 @@ function handleSingleMode(prompt: string, sessionId?: string, chatId?: string, w
                 const errorMsg = `Error: ${err.message}`;
                 controller.enqueue(encoder.encode(`0:${JSON.stringify(errorMsg)}\n`));
                 controller.enqueue(encoder.encode('d:{"finishReason":"error"}\n'));
-                
+                // Mark call as error
+                console.log('[handleSingleMode] Completing cursor call (error)', { callId });
+                completeCursorCall(callId, false);
+
                 if (chatId) {
                     db.updateSession({ id: chatId, status: 'error' });
                 }
                 controller.close();
-            });
-
-            // Capture stderr for debugging
-            agent.stderr.on('data', (chunk: Buffer) => {
-                console.error('[Agent stderr]', chunk.toString());
             });
         },
     });
