@@ -1,34 +1,13 @@
-# Maestro
+# CursorPilot
 
 AI-powered orchestration system for Cursor Agent. Let AI automatically manage and interact with Cursor to complete complex development tasks.
 
 ## Core Concept
 
-Maestro provides two interaction modes:
+CursorPilot provides two interaction modes:
 
 1. **Direct Chat** - Talk directly with Cursor Agent for simple tasks
 2. **AI Orchestrator** - Let AI break down complex tasks and manage multiple Cursor conversations
-
-## Prerequisites
-
-### Cursor CLI
-
-This project requires Cursor CLI to interact with Cursor Agent. Install it first:
-
-```bash
-# macOS, Linux, WSL
-curl https://cursor.com/install -fsS | bash
-
-# Windows PowerShell
-irm 'https://cursor.com/install?win32=true' | iex
-```
-
-Verify installation:
-```bash
-agent --version
-```
-
-For more details, see [Cursor CLI Documentation](https://cursor.com/cn/docs/cli/overview).
 
 ## Setup
 
@@ -58,7 +37,7 @@ Visit http://localhost:3000
 
 ## Telegram Bot Integration
 
-Maestro supports Telegram bot integration, allowing you to interact with the Orchestrator Agent directly from Telegram.
+CursorPiolt supports Telegram bot integration, allowing you to interact with the Orchestrator Agent directly from Telegram.
 
 ### Step 1: Create a Telegram Bot
 
